@@ -28,8 +28,8 @@ class PersonalPathLayout(PathLayout):
     project_name = (
         "DynVision_Working"  # working directory name (separate from toolbox_name)
     )
-    toolbox_name = "DynVision"
-    user_name = "rg5022"
+    toolbox_name = "dynvision"
+    user_name = "glennb"
 
     @classmethod
     def _local_layout(
@@ -39,7 +39,7 @@ class PersonalPathLayout(PathLayout):
         env: Environment,
     ) -> "PersonalPathLayout":
         if working_dir is None:
-            working_dir = Path("/home/rgutzen/01_PROJECTS/Modeling_Dynamical_Vision")
+            working_dir = Path("/home/glenn/DynVision_Working")
         if toolbox_dir is None:
             toolbox_dir = Path(__file__).resolve().parent
         return super()._local_layout(working_dir, toolbox_dir, env)
