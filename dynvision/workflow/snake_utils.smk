@@ -433,7 +433,7 @@ def get_conda_env() -> tuple[Optional[str], str]:
     try:
         env_name = os.environ['CONDA_DEFAULT_ENV']
         env_status = subprocess.check_output(
-            ['conda', 'info', '--envs']
+            ['conda', 'info', '--envs'], shell=True
         ).decode('utf-8')
         return env_name, env_status
     except (KeyError, subprocess.CalledProcessError):
@@ -498,7 +498,8 @@ def build_execution_command(script_path, use_distributed=False):
             f"{script_path}"
         )
     else:
-        cmd_parts.append(f"python {script_path}")
+        python_bin = sys.executable or "python"
+        cmd_parts.append(f"{python_bin} {script_path}")
     
     return "\\\n        ".join(cmd_parts)
 

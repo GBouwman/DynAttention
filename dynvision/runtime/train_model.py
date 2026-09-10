@@ -568,7 +568,16 @@ class TrainingOrchestrator:
 
         try:
             n_timesteps = inputs.shape[1]
-            sample_images = [inputs[0, t] for t in range(n_timesteps)]
+            
+            # Normalize to [0, 1] for visualization (min-max scaling per image) to prevent wandb from clipping negative values to black
+            sample_images = []
+            for t in range(n_timesteps):
+                img = inputs[0, t].float()
+                img_min, img_max = img.min(), img.max()
+                if img_max > img_min:
+                    img = (img - img_min) / (img_max - img_min)
+                sample_images.append(img)
+                
             sample_labels = [str(labels[0, t].item()) for t in range(n_timesteps)]
 
             pl_logger.log_image(
@@ -592,18 +601,21 @@ class TrainingOrchestrator:
                     model_name = str(relative_path.with_suffix(""))
                 except (IndexError, ValueError):
                     model_name = output_path.name.removesuffix(output_path.suffix)
+                import wandb
 
                 # Initialize logger
                 # WANDB_DIR is no longer set as an import-time side effect of
                 # `project_paths` (see docs/development/planning/project-paths-seam.md,
                 # issue #14); set it explicitly here before wandb picks it up.
                 set_wandb_dir(project_paths)
+                # Initialize logger with log_model=False to prevent uploading heavy checkpoints/weights to wandb
                 pl_logger = pl.loggers.WandbLogger(
                     project=project_paths.project_name,
                     save_dir=project_paths.large_logs,
                     config=self.config.get_full_config(flat=True),
                     tags=["train"],
                     name=model_name,
+                    log_model=False,
                 )
 
                 # Setup trainer components
@@ -671,8 +683,6 @@ class TrainingOrchestrator:
                     trainer.strategy.barrier()
                     logger.debug("All ranks synchronized")
 
-                # Hack to log histograms
-                wandb.init(settings=wandb.Settings(init_timeout=120))
 
                 # Final synchronization before training
                 if trainer.strategy and hasattr(trainer.strategy, "barrier"):
@@ -710,6 +720,36 @@ class TrainingOrchestrator:
                 # Save trained model (get final model from trainer)
                 final_model = trainer.model
                 self.model_manager.save_model(final_model)
+
+                # Ensure wandb flushes all pending data
+                if "wandb" in sys.modules:
+                    try:
+                        logger.info("Finishing WandB sync (120s timeout)...")
+                        import threading
+                        
+                        def finish_wandb():
+                            try:
+                                wandb.finish()
+                            except Exception:
+                                pass
+                                
+                        t = threading.Thread(target=finish_wandb)
+                        t.daemon = True
+                        t.start()
+                        t.join(timeout=120.0)
+                        
+                        if t.is_alive():
+                            logger.warning("\n[WANDB] Sync timed out after 120s. Data is saved locally.")
+                            logger.warning("[WANDB] You can sync it later by running: wandb sync")
+                            logger.info("Training completed successfully (forcing exit to prevent hang)!")
+                            import os
+                            os._exit(0)
+                    except KeyboardInterrupt:
+                        logger.warning("\n[WANDB] Sync manually interrupted by user. Data is saved locally.")
+                        logger.warning("[WANDB] You can sync it later by running: wandb sync")
+                        logger.info("Training completed successfully (forcing exit to prevent hang)!")
+                        import os
+                        os._exit(0)
 
                 logger.info("Training completed successfully!")
                 return 0

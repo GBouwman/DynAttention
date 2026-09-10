@@ -335,16 +335,9 @@ class MonitoringMixin(Monitoring, LightningModule):
         self._check_weights()
         self._log_system_info()
 
-        if hasattr(self.logger, "watch") and not hasattr(self, "_wandb_watched"):
-            try:
-                self.logger.watch(self)
-                self._wandb_watched = True  # Mark as watched
-            except ValueError as e:
-                if "can only call" in str(e) and "wandb.watch" in str(e):
-                    # Already being watched, skip silently
-                    pass
-                else:
-                    raise e
+        # wandb.watch disabled: graph tracing hangs on recurrent models with cyclic buffers
+        # and causes GPU driver timeout (device not ready)
+        pass
 
     def on_train_end(self) -> None:
         """Final diagnostics and cleanup."""
@@ -440,7 +433,9 @@ class MonitoringMixin(Monitoring, LightningModule):
         self._check_training_health(loss, batch_idx)
 
         if batch_idx % self.log_every_n_steps == 0:
-            self.log_param_stats()
+            # Only log parameter norms across all runs (like fast_local_mode)
+            # to keep WandB fast and eliminate heavy weight histogram serialization
+            self.log_param_stats(metrics=["norm"])
 
     def on_before_optimizer_step(self, optimizer: Any, optimizer_idx: int = 0) -> None:
         """Check gradients before optimizer step.

@@ -264,6 +264,11 @@ def get_dataset(
     Raises:
         ValueError: If data path is invalid
     """
+    if (data_name and "miniecoset" in data_name.lower()) or (data_path.is_file() and data_path.suffix.lower() == ".h5"):
+        from dynvision.data.miniecoset_dataset import MiniEcosetH5Dataset
+        split = "train" if transform_context == "train" else "val"
+        return MiniEcosetH5Dataset(h5_path=data_path, split=split)
+
     # set data_path to the parent directory if it is a file
     if data_path.is_file():
         if data_path.with_suffix("").exists():

@@ -2,22 +2,11 @@
 model_name: 
   - DyRCNNx8
   # - DyRCNNx4
-  # - DyRCNNx2
-  # - AlexNet
-  # - CorNetRT
-  # - CordsNet
-  # - ResNet20
-  # - ResNet18
-  # - ResNet1202
-  # - ResNet44
 
-# seed: ["6000", "6001", "6002"] #, "6003", "6004", "6005"]
-seed: ["7000", "7001", "7002"]
-# seed: ["7004", "7005"]
-# seed: ["9020"] #, "8001", "8002"] # calculating activityloss on non-linearities
+seed: ["7000"]
 init_with_pretrained: False
 
-status: [trained-best] #, trained-epoch=299]
+status: [trained-best]
 
 model_args:
   tsteps: 20
@@ -29,28 +18,16 @@ model_args:
   lossrt: 4
   activityloss: 0.0002 
   pattern: '1'
-  # pattern: ['1', '1011']
-  rctype: 'full'
+  rctype: 'self'
   rctarget: 'output'
   skip: 'true'
   feedback: 'false'
 
 category:
-  - activityloss
-  # - pattern
-  - tsteps
-  # - idle
-  - lossrt
-  # - tau
-  # - trc
-  # - tff
-  - tsk
-  - skip
-  # - feedback
   - rctype
-  - rctarget
+  - tsteps
 
-data_name: imagenette
+data_name: miniecoset
 # data_name: imagenet
 # data_name: tinyimagenet
 # data_name: cifar100
@@ -75,7 +52,11 @@ experiment:
   # - stability
 
 # Training parameters
+n_classes: 112
+batch_size: 16
+accumulate_grad_batches: 4
+precision: "16-mixed"
+num_workers: 2
 loss: 
   - CrossEntropyLoss
-  - ActivityLoss
 

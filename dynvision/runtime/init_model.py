@@ -89,10 +89,21 @@ def infer_dimensions_from_dataset(config: InitParams) -> None:
         )
         return
 
+    # Force torch backend for dimension inference - FFCV transforms are not
+    # callable by standard PyTorch DataLoader, we only need one image here
+    preview_kwargs = config.data.get_preview_dataloader_kwargs()
+    dataset_kwargs = config.data.get_dataset_kwargs()
+    preview_kwargs['transform_backend'] = 'torch'
+    preview_kwargs['num_workers'] = 0
+    preview_kwargs['persistent_workers'] = False
+    dataset_kwargs['transform_backend'] = 'torch'
+
     try:
         data_module = SimpleDataModule(config=config, dataset_path=config.dataset_path)
         preview_loader = data_module.create_preview_loader(
             dataloader_class=StandardDataLoader,
+            dataloader_kwargs=preview_kwargs,
+            dataset_kwargs=dataset_kwargs,
         )
         dataset = data_module.dataset
         if dataset is None:

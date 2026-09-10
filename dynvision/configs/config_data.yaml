@@ -55,6 +55,18 @@ transform_presets:
         - "RandomContrast(0.2)"
         - "RandomSaturation(0.2)"
         - "RandomTranslate(padding=22, fill=(0, 0, 0))"
+      cifar10:
+        - "RandomHorizontalFlip()"
+        - "RandomTranslate(padding=4, fill=(0, 0, 0))"
+        - "RandomBrightness(0.2)"
+        - "RandomContrast(0.2)"
+        - "RandomSaturation(0.2)"
+      cifar100:
+        - "RandomHorizontalFlip()"
+        - "RandomTranslate(padding=4, fill=(0, 0, 0))"
+        - "RandomBrightness(0.2)"
+        - "RandomContrast(0.2)"
+        - "RandomSaturation(0.2)"
       mnist:
         - "RandomBrightness(0.2)"
         - "RandomContrast(0.2)"
@@ -76,6 +88,8 @@ data_resolution:
     imagenet: 224
     snakenet: 224
     imagenette: 224
+    miniecoset: 224
+    mini-ecoset: 224
 
 # data statistics for normalization
 data_statistics:
@@ -97,6 +111,12 @@ data_statistics:
     tinyimagenet:
         mean: [0.485, 0.456, 0.406]
         std: [0.229, 0.224, 0.225]
+    miniecoset:
+        mean: [0.4928, 0.4685, 0.4077]
+        std: [0.2831, 0.2759, 0.2928]
+    mini-ecoset:
+        mean: [0.4928, 0.4685, 0.4077]
+        std: [0.2831, 0.2759, 0.2928]
 
 # predefined data subgroups for testing
 # selected via wildcards in filenames "*_{data_name}_{status}_{data_group}"
