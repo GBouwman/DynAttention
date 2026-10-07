@@ -39,7 +39,7 @@ class PersonalPathLayout(PathLayout):
         env: Environment,
     ) -> "PersonalPathLayout":
         if working_dir is None:
-            working_dir = Path("/home/glenn/DynVision_Working")
+            working_dir = Path.home() / "DynVision_Working"
         if toolbox_dir is None:
             toolbox_dir = Path(__file__).resolve().parent
         return super()._local_layout(working_dir, toolbox_dir, env)
