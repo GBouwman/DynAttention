@@ -20,6 +20,7 @@ import os
 import sys
 import multiprocessing
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -380,7 +381,7 @@ class ModelManager:
         model = model_class(**model_kwargs).to(self.device)
 
         # Load state dict with error handling
-        if not load_state_dict:
+        if load_state_dict:
             try:
                 model.load_state_dict(state_dict, strict=True)
                 logger.info("Model state loaded successfully")
@@ -633,8 +634,21 @@ class TrainingOrchestrator:
 
                 # Check for existing Lightning checkpoint FIRST (before loading anything)
                 existing_checkpoint = get_best_checkpoint(
-                    checkpoint_path.parent, model_name, raise_error=False
+                    checkpoint_path.parent,
+                    checkpoint_path.name.removesuffix(".ckpt"),
+                    raise_error=False
                 )
+
+                if existing_checkpoint and not self.config.resume:
+                    # Checkpoints from an earlier run under the same name: don't resume
+                    # from them, and move them aside so trained-best.pt can't pick them up.
+                    archive_dir = self._archive_old_checkpoints(trainer, checkpoint_path)
+                    logger.warning(
+                        f"Found checkpoints of an earlier run in {checkpoint_path.parent}. "
+                        f"Starting fresh; moved them to {archive_dir}. "
+                        "Set resume=True to continue that run instead."
+                    )
+                    existing_checkpoint = None
 
                 if existing_checkpoint:
                     # Verify checkpoint accessibility across all ranks if distributed
@@ -758,6 +772,28 @@ class TrainingOrchestrator:
                 logger.error(f"Training failed: {e}")
                 self._handle_training_failure(trainer, checkpoint_path)
                 return 1
+
+    def _archive_old_checkpoints(
+        self, trainer: pl.Trainer, checkpoint_path: Path
+    ) -> Path:
+        """Move checkpoints of an earlier run into previous_runs/<timestamp>/.
+
+        Only rank 0 moves files; all ranks then synchronize. The checkpoint
+        globs used elsewhere are non-recursive, so archived files are ignored.
+        """
+        stem = checkpoint_path.name.removesuffix(".ckpt")
+        archive_dir = (
+            checkpoint_path.parent
+            / "previous_runs"
+            / datetime.now().strftime("%Y%m%d-%H%M%S")
+        )
+        if trainer.is_global_zero:
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            for ckpt in checkpoint_path.parent.glob(f"{stem}-*.ckpt"):
+                ckpt.rename(archive_dir / ckpt.name)
+        if trainer.strategy and hasattr(trainer.strategy, "barrier"):
+            trainer.strategy.barrier()
+        return archive_dir
 
     def _verify_checkpoint_across_ranks(
         self, trainer: pl.Trainer, checkpoint_path: Optional[str]

@@ -103,7 +103,7 @@ def get_best_checkpoint(
 
     # Updated pattern: model_identifier-best-<epch>-<loss>.ckpt
     # Example: mymodel-best-12-0.34.ckpt
-    model_identifier = model_identifier.rstrip("-best")
+    model_identifier = model_identifier.removesuffix("-best")
     regex = pattern or (
         rf"{re.escape(model_identifier)}-best-(\d+)-(\d+(?:\.\d+)?)"
         rf"(?:-v\d+)?\.ckpt"

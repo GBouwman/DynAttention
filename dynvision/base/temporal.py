@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from torch.nn.modules.module import _IncompatibleKeys
 
 from dynvision import losses
 from dynvision.data.operations import _adjust_data_dimensions, _adjust_label_dimensions
@@ -1106,10 +1107,15 @@ class TemporalBase(nn.Module):
 
     def load_state_dict(
         self, state_dict: Dict[str, torch.Tensor], **kwargs: Any
-    ) -> None:
+        ):
+        state_dict = dict(state_dict)
+        own_keys = self.state_dict().keys()
+        missing = [k for k in own_keys if k not in state_dict]
+        unexpected = [k for k in state_dict if k not in own_keys]
         state_dict = self._add_missing_parameters_to_state_dict(state_dict)
         state_dict = self._remove_unexpected_parameters_from_state_dict(state_dict)
         super().load_state_dict(state_dict, **kwargs)
+        return _IncompatibleKeys(missing, unexpected)
 
     # Trainable parameter management
     ################################
