@@ -15,6 +15,7 @@ from typing import (
     Type,
 )
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from enum import Enum
@@ -48,6 +49,58 @@ from dynvision.params.resolution import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _git(*args: str) -> str:
+    """Run a git command in the DynVision repository and return its stdout."""
+    return subprocess.run(
+        ["git", "-C", str(_REPO_ROOT), *args],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    ).stdout.strip()
+
+
+def _git_provenance() -> Dict[str, Any]:
+    """Describe the code version that produced an output (best effort).
+
+    Returns the commit hash, commit date, branch, and whether ``dynvision/`` has
+    uncommitted or untracked changes. For a dirty tree, ``code_modified_at`` is
+    the newest modification time among the changed files, i.e. when the code
+    that actually ran was last edited. Outside a git checkout (e.g. a pip
+    install) all fields are ``"unknown"`` or ``None``.
+    """
+    try:
+        status = _git("status", "--porcelain", "--untracked-files=all", "--", "dynvision")
+        # porcelain v1 lines: "XY path" or "XY old -> new" for renames
+        changed = [
+            _REPO_ROOT / line[3:].split(" -> ")[-1].strip('"')
+            for line in status.splitlines()
+            if line.strip()
+        ]
+        mtimes = [path.stat().st_mtime for path in changed if path.exists()]
+        return {
+            "commit": _git("rev-parse", "HEAD"),
+            "commit_date": _git("log", "-1", "--format=%cI"),
+            "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(changed),
+            "code_modified_at": (
+                datetime.fromtimestamp(max(mtimes)).astimezone().isoformat(timespec="seconds")
+                if mtimes
+                else None
+            ),
+        }
+    except (OSError, subprocess.SubprocessError):
+        return {
+            "commit": "unknown",
+            "commit_date": None,
+            "branch": "unknown",
+            "dirty": None,
+            "code_modified_at": None,
+        }
 
 
 ComponentDict = Dict[str, Any]
@@ -501,6 +554,9 @@ class CompositeParams(BaseParams):
         flat_params = self._build_flat_parameter_map()
         flat_params["_active_modes"] = list(mode_resolution.active_modes)
 
+        git_info = _git_provenance()
+        flat_params["_git"] = git_info
+
         provenance_map = self._build_flat_provenance_map()
         if provenance_map:
             flat_params["_provenance"] = provenance_map
@@ -511,7 +567,17 @@ class CompositeParams(BaseParams):
             "primary_output": str(primary_output),
             "source_precedence": "config -> modes -> cli",
             "active_modes": ", ".join(mode_resolution.active_modes) or "none",
+            "git_commit": f"{git_info['commit']}{' (dirty)' if git_info['dirty'] else ''}",
+            "git_commit_date": git_info["commit_date"],
         }
+        if git_info["dirty"]:
+            metadata["code_modified_at"] = git_info["code_modified_at"]
+            # Save the uncommitted changes to tracked files next to the output
+            try:
+                diff = _git("diff", "HEAD", "--", "dynvision")
+                Path(f"{primary_output}.git.diff").write_text(diff + "\n", encoding="utf-8")
+            except (OSError, subprocess.SubprocessError) as err:
+                logger.warning(f"Could not save git diff for {primary_output}: {err}")
         if mode_resolution.raw_values:
             metadata["mode_toggles"] = mode_resolution.raw_values
         if extra_metadata:

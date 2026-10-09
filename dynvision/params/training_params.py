@@ -73,6 +73,14 @@ class TrainingParams(CompositeParams):
     checkpoint_dir: Optional[Path] = Field(
         default=None, description="Directory to save training checkpoints"
     )
+    resume: bool = Field(
+        default=False,
+        description=(
+            "Resume from the best checkpoint in checkpoint_dir if one exists. "
+            "If False, checkpoints of an earlier run are moved to "
+            "checkpoint_dir/previous_runs/<timestamp>/ and training starts fresh."
+        ),
+    )
     dataset_link: Optional[Path] = Field(
         default=None, description="Path to training dataset"
     )
