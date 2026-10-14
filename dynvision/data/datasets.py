@@ -266,7 +266,7 @@ def get_dataset(
     """
     if (data_name and "miniecoset" in data_name.lower()) or (data_path.is_file() and data_path.suffix.lower() == ".h5"):
         from dynvision.data.miniecoset_dataset import MiniEcosetH5Dataset
-        split = "train" if transform_context == "train" else "val"
+        split = kwargs.get("h5_split") or ("train" if transform_context == "train" else "val")
         return MiniEcosetH5Dataset(h5_path=data_path, split=split)
 
     # set data_path to the parent directory if it is a file

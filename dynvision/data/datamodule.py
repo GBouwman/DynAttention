@@ -252,13 +252,30 @@ class DataModule(DataInterface, pl.LightningDataModule):
 
     def _setup_pytorch_loaders(self, config: Dict[str, Any]) -> None:
         """Set up standard PyTorch data loaders."""
-        # Create dataset once and split
-        dataset = self._create_pytorch_dataset(context="train", **config)
+        loader_kwargs = {k: v for k, v in config.items() if k != "shuffle"}
+        # Evaluation transforms (no augmentation). The `context` argument below only affects
+        # logging; transforms (and the mini-ecoset split) come from these kwargs.
+        eval_config = {**config, "transform_context": "test"}
 
-        self.train_loader, self.val_loader = get_train_val_loaders(
-            dataset=dataset, **config
-        )
-
+        if "miniecoset" in str(self.config.data.data_name).lower():
+            # The h5 has its own splits: train on 'train', validate on 'val';
+            # 'test' and 'testplus' stay untouched for test_model.
+            train_dataset = self._create_pytorch_dataset(
+                context="train", **{**config, "h5_split": "train"}
+            )
+            val_dataset = self._create_pytorch_dataset(
+                context="val", **{**eval_config, "h5_split": "val"}
+            )
+            self.train_loader = get_data_loader(train_dataset, shuffle=True, **loader_kwargs)
+            self.val_loader = get_data_loader(val_dataset, shuffle=False, **loader_kwargs)
+        else:
+            # Folder datasets: seeded split of train_all; the validation part is read
+            # through a second dataset object with evaluation transforms.
+            dataset = self._create_pytorch_dataset(context="train", **config)
+            val_view = self._create_pytorch_dataset(context="val", **eval_config)
+            self.train_loader, self.val_loader = get_train_val_loaders(
+                dataset=dataset, val_dataset=val_view, seed=self.config.seed, **config
+            )
         train_log_kwargs = dict(config)
         train_log_kwargs.update({"shuffle": True})
         self._log_dataloader_creation(
@@ -266,9 +283,8 @@ class DataModule(DataInterface, pl.LightningDataModule):
             dataloader_kwargs=train_log_kwargs,
             context="train",
         )
-
-        val_log_kwargs = dict(config)
-        val_log_kwargs.update({"shuffle": False, "train": False})
+        val_log_kwargs = dict(eval_config)
+        val_log_kwargs.update({"shuffle": False})
         self._log_dataloader_creation(
             dataloader_class=self.val_loader.__class__,
             dataloader_kwargs=val_log_kwargs,

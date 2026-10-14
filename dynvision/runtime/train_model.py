@@ -985,6 +985,7 @@ def main() -> int:
     try:
         config = TrainingParams.from_cli_and_config()
         config.setup_logging()
+        pl.seed_everything(config.seed, workers=True)
 
     except Exception as e:
         logger.error(f"Failed to create training configuration: {e}")

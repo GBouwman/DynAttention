@@ -33,19 +33,22 @@ from dynvision.data.miniecoset_dataset import (
 )
 
 
+def _strip_digits(name: str) -> str:
+    return "".join(c for c in name if not c.isdigit())
+
+
 class CueConflictDataset(torch.utils.data.Dataset):
     """Loads the 1,280 Geirhos cue-conflict images from model-vs-human datasets/cue-conflict."""
     def __init__(self, dataset_dir: Path, transform=None):
         self.dataset_dir = Path(dataset_dir)
         self.transform = transform
         self.samples = []
-        
+
         for p in sorted(self.dataset_dir.glob("*/*.png")):
-            # Filename convention: <shape>_<texture>_<id>.png or similar
-            fname = p.stem
-            parts = fname.split("_")
-            shape_cat = parts[0]
-            texture_cat = parts[1] if len(parts) > 1 else shape_cat
+            # Filename convention: <shape><n>-<texture><m>.png, e.g. airplane1-bicycle2.png
+            shape_part, texture_part = p.stem.split("_")[-1].split("-")
+            shape_cat = _strip_digits(shape_part)
+            texture_cat = _strip_digits(texture_part)
             self.samples.append({
                 "path": str(p),
                 "filename": p.name,
@@ -59,7 +62,8 @@ class CueConflictDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         item = self.samples[idx]
-        img = Image.open(item["path"]).convert("RGB")
+        # numpy HWC uint8: the val transforms start with ToPILImage, which rejects PIL images
+        img = np.array(Image.open(item["path"]).convert("RGB"))
         if self.transform:
             img = self.transform(img)
         else:
@@ -75,15 +79,19 @@ def run_temporal_cue_conflict_evaluation(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     batch_size: int = 32,
     model_name_prefix: str = "DyRCNNx4",
+    img_size: int = 224,
+    mean: list = None,
+    std: list = None,
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     cue_conflict_dir = cue_conflict_dir or (MODELVSHUMAN_DIR / "datasets" / "cue-conflict")
     if not cue_conflict_dir.exists():
         raise FileNotFoundError(f"Cue-conflict dataset not found at {cue_conflict_dir}")
 
-    transform = get_default_transforms(img_size=224, split="val")
+    # Same resolution and normalization as in training
+    transform = get_default_transforms(img_size=img_size, split="val", mean=mean, std=std)
     ds = CueConflictDataset(cue_conflict_dir, transform=transform)
     loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=4)
 
@@ -102,9 +110,12 @@ def run_temporal_cue_conflict_evaluation(
     with torch.no_grad():
         for batch_imgs, shapes, textures, filenames in tqdm(loader, desc="Batches"):
             batch_imgs = batch_imgs.to(device)
-            # Model forward rollout
-            # DynVision DyRCNN forward returns logits for timesteps: (B, T, 112) or (B, 112)
-            outputs = model(batch_imgs)
+            # Present the image over time exactly as in training (expand to model.n_timesteps,
+            # apply the presentation pattern, add residual timesteps). model(batch_imgs) on a
+            # 4-D batch would run a single timestep only.
+            dummy_labels = torch.zeros(batch_imgs.size(0), dtype=torch.long, device=device)
+            inputs, _ = model._process_batch((batch_imgs, dummy_labels))[:2]
+            outputs = model(inputs)
             
             if isinstance(outputs, torch.Tensor) and outputs.ndim == 3:
                 # (Batch, Timesteps, Classes)
@@ -152,8 +163,10 @@ def run_temporal_cue_conflict_evaluation(
 
     for t in sorted(all_predictions.keys()):
         df_t = pd.DataFrame(all_predictions[t])
-        n_shape = int(df_t["correct_shape"].sum())
-        n_texture = int(df_t["correct_texture"].sum())
+        # As in model-vs-human: images whose shape and texture category coincide carry no conflict
+        df_conflict = df_t[df_t["shape"] != df_t["texture"]]
+        n_shape = int(df_conflict["correct_shape"].sum())
+        n_texture = int(df_conflict["correct_texture"].sum())
         total_decisions = n_shape + n_texture
         shape_bias = (n_shape / total_decisions) if total_decisions > 0 else float("nan")
 
@@ -181,6 +194,7 @@ def run_temporal_cue_conflict_evaluation(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, required=True, help="Path to trained model .pt or .ckpt")
+    parser.add_argument("--config_path", type=str, default=None, help="Resolved training config (default: trained.pt.config.yaml next to the model)")
     parser.add_argument("--categories_h5", type=str, default="/home/glenn/DynVision_Working/data/raw/mini-ecoset/texture2shape_miniecoset_256px.h5")
     parser.add_argument("--output_dir", type=str, default="/home/glenn/DynVision_Working/reports/model_vs_human")
     parser.add_argument("--batch_size", type=int, default=32)
@@ -190,17 +204,22 @@ if __name__ == "__main__":
     with h5py.File(args.categories_h5, "r") as f:
         categories_112 = [c.decode("utf-8") if isinstance(c, bytes) else str(c) for c in f["categories"][:]]
 
-    model = torch.load(args.model_path)
-    if isinstance(model, dict) and "state_dict" in model:
-        # Load lightning state_dict if passed .ckpt
-        from dynvision.models.dyrcnn import DyRCNNx4
-        net = DyRCNNx4(n_classes=112, recurrence_type="self")
-        net.load_state_dict(model["state_dict"])
-        model = net
+    from dynvision.utils.model_utils import load_trained_model
 
+    # Rebuild the model exactly as it was trained (arguments from its resolved config)
+    model_path = Path(args.model_path)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    net, cfg = load_trained_model(model_path, config_path=args.config_path, device=device)
+
+    mean, std = cfg["data.normalize"]
     run_temporal_cue_conflict_evaluation(
-        model=model,
+        model=net,
         categories_112=categories_112,
         output_dir=Path(args.output_dir),
-        batch_size=args.batch_size
+        device=device,
+        batch_size=args.batch_size,
+        model_name_prefix=model_path.parent.parent.name,  # e.g. DyRCNNx8:rctype=self+tsteps=20_7000
+        img_size=cfg["data.resolution"],
+        mean=mean,
+        std=std,
     )

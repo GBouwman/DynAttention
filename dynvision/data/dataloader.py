@@ -1093,6 +1093,8 @@ def get_train_val_loaders(
     num_workers: int = 0,
     data_timesteps: int = 1,
     dataloader: Optional[str] = None,
+    seed: Optional[int] = None,
+    val_dataset: Optional[torch.utils.data.Dataset] = None,
     **kwargs: Any,
 ) -> Tuple[DataLoader, DataLoader]:
     """Create training and validation data loaders from a dataset.
@@ -1104,6 +1106,8 @@ def get_train_val_loaders(
         num_workers: Number of worker processes
         data_timesteps: Number of timesteps for temporal data
         dataloader: Specific dataloader class to use
+        seed: Seed for the train/val split (for reproducibility)
+        val_dataset: Same samples as dataset, but with evaluation transforms; the validation subset is taken from it.
         **kwargs: Additional arguments for dataloaders
 
     Returns:
@@ -1113,10 +1117,15 @@ def get_train_val_loaders(
     train_size = int(train_ratio * len(dataset))
     val_size = len(dataset) - train_size
 
-    # Split dataset
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        dataset, [train_size, val_size]
-    )
+    # Random_split does exactly this internally, so the split is identical to a seeded random_split.
+    generator = torch.Generator().manual_seed(int(seed)) if seed is not None else None
+    indices = torch.randperm(len(dataset), generator=generator).tolist()
+    train_dataset = torch.utils.data.Subset(dataset, indices[:train_size])
+    # Same images, but read through val_dataset (evaluation transforms) if one is given
+    val_source = val_dataset if val_dataset is not None else dataset
+    if len(val_source) != len(dataset):
+        raise ValueError("val_dataset must list the same samples as dataset")
+    val_dataset = torch.utils.data.Subset(val_source, indices[train_size:])
 
     # Common loader arguments
     common_kwargs = {

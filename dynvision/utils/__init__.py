@@ -84,6 +84,7 @@ from .model_utils import (
     check_weights,
     handle_errors,
     load_model_and_weights,
+    load_trained_model,
 )
 
 from .visualization_utils import (
@@ -165,6 +166,7 @@ __all__ = [
     "check_weights",
     "handle_errors",
     "load_model_and_weights",
+    "load_trained_model",
     # Visualization utilities
     "standardize_category_value",
     "standardize_series",

@@ -10,7 +10,7 @@ import logging
 import traceback
 from functools import wraps
 from types import SimpleNamespace
-from typing import Any, Callable, Tuple, Optional
+from typing import Any, Callable, Tuple, Optional, Dict
 from pathlib import Path
 from .config_utils import filter_kwargs
 
@@ -169,3 +169,52 @@ def load_model_and_weights(
     model.load_state_dict(state_dict)
 
     return model
+
+def load_trained_model(
+    model_path: str | Path,
+    config_path: Optional[str | Path] = None,
+    device: str | torch.device = "cpu",
+) -> Tuple[torch.nn.Module, Dict[str, Any]]:
+    """Rebuild a trained DynVision model as it was trained and load its weights.
+
+    Reads the resolved training config written next to the weights
+    (``trained.pt.config.yaml`` by default), rebuilds the model with the same
+    constructor arguments, builds the lazily created skip/feedback connections,
+    then loads the weights. Works for plain state dicts (``*.pt``) and Lightning
+    checkpoints (``*.ckpt``).
+
+    Returns:
+        The model in eval mode on ``device``, and the resolved config as a flat
+        dict (e.g. ``cfg["data.resolution"]``, ``cfg["data.normalize"]``).
+    """
+    import yaml
+    from dynvision import models  # lazy import avoids a circular dependency
+
+    model_path = Path(model_path)
+    config_path = Path(config_path) if config_path else model_path.parent / "trained.pt.config.yaml"
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    model_class = getattr(models, cfg["model.model_name"])
+    model_kwargs = {
+        key.split(".", 1)[1]: value
+        for key, value in cfg.items()
+        if key.startswith("model.") and value is not None
+    }
+    model_kwargs, _ = filter_kwargs(model_class, model_kwargs)
+    model_kwargs.pop("target_dtype", None)  # load in float32; float16 breaks construction on CPU
+    model = model_class(**model_kwargs).to(device)
+
+    # Lazily created skip/feedback convs must exist before loading, else their weights are dropped
+    if hasattr(model, "_initialize_connections"):
+        model._initialize_connections()
+
+    checkpoint = torch.load(model_path, map_location="cpu")
+    state_dict = checkpoint.get("state_dict", checkpoint)  # .ckpt or plain .pt
+    result = model.load_state_dict(state_dict)
+    if result is not None and (result.missing_keys or result.unexpected_keys):
+        logger.warning(
+            f"Loading {model_path.name}: missing keys {result.missing_keys}, "
+            f"unexpected keys {result.unexpected_keys}"
+        )
+    return model.eval(), cfg
