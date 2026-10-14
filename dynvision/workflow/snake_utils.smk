@@ -476,7 +476,10 @@ def build_execution_command(script_path, use_distributed=False):
     cmd_parts = []
 
     # Automatic cluster detection (replaces use_executor config)
-    use_executor = is_cluster_execution()
+    use_executor = (
+        is_cluster_execution()
+        and os.environ.get("DYNVISION_NO_CONTAINER", "0") != "1"
+    )
 
     if use_distributed:
         setup_script = SCRIPTS / 'cluster' / 'setup_distributed_execution.sh'
