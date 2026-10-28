@@ -15,6 +15,7 @@ References:
 """
 
 import logging
+import math
 from typing import Optional, Union, Dict, Any, List, Tuple
 
 import torch
@@ -28,6 +29,7 @@ from dynvision.model_components import (
     RecurrentConnectedConv2d,
     Skip,
     Feedback,
+    SheetPool,
 )
 from dynvision.base import BaseModel
 from dynvision.utils import alias_kwargs, str_to_bool
@@ -102,8 +104,19 @@ class DyRCNN(BaseModel):
         supralinearity: float = 1,
         input_adaption_weight: float = 0,
         use_retina: bool = False,
+        # Topographic sheet pooling (Qian et al. 2026)
+        sheetpool: bool = False,
+        sheetpool_sigma_floor: float = 0.75,
+        sheetpool_schedule: bool = True,
+        sheetpool_decay_epochs: float = 22.5,
         **kwargs: Any,
     ) -> None:
+
+        # Sheet pooling settings are needed inside _define_architecture
+        self.sheetpool = str_to_bool(sheetpool)
+        self.sheetpool_sigma_floor = float(sheetpool_sigma_floor)
+        self.sheetpool_schedule = str_to_bool(sheetpool_schedule)
+        self.sheetpool_decay_epochs = float(sheetpool_decay_epochs)
 
         # Store DyRCNN-specific biological attributes
         self.train_tau = str_to_bool(train_tau)
@@ -137,6 +150,31 @@ class DyRCNN(BaseModel):
 
     def _define_architecture(self) -> None:
         raise NotImplementedError("Define the model architecture!")
+
+    def _add_sheetpool(self) -> None:
+        """Pool each area's output over its channel sheet, after the nonlinearity."""
+        if not self.sheetpool:
+            return
+        if "sheetpool" not in self.layer_operations:
+            self.layer_operations.insert(self.layer_operations.index("supralin") + 1, "sheetpool")
+        for name in self.layer_names:
+            setattr(
+                self,
+                f"sheetpool_{name}",
+                SheetPool(getattr(self, name).out_channels, sigma_floor=self.sheetpool_sigma_floor),
+            )
+
+    def _update_sheetpool_sigma(self, epoch: int) -> None:
+        """Qian's schedule: σ = max(floor, ε·side/2), ε = min(exp(-epoch / decay), 1)."""
+        eps = min(math.exp(-epoch / self.sheetpool_decay_epochs), 1.0)
+        for name in self.layer_names:
+            pool = getattr(self, f"sheetpool_{name}")
+            pool.set_sigma(eps * pool.side / 2)
+
+    def on_train_epoch_start(self) -> None:
+        super().on_train_epoch_start()
+        if self.sheetpool and self.sheetpool_schedule:
+            self._update_sheetpool_sigma(self.current_epoch)
 
     def _parse_feedback_mode(self, feedback) -> None:
         if str(feedback).lower() == "add":
@@ -415,6 +453,8 @@ class DyRCNNx4(DyRCNN):
         nn.init.trunc_normal_(self.classifier[-1].weight, **trunc_normal_params)
         nn.init.constant_(self.classifier[-1].bias, 0)
 
+        self._add_sheetpool()
+
 
 class DyRCNNx8(DyRCNNx4):
     """
@@ -633,6 +673,8 @@ class DyRCNNx8(DyRCNNx4):
             nn.Flatten(),
             nn.Linear(self.IT.out_channels, self.n_classes),
         )
+
+        self._add_sheetpool()
 
 
 class DyRCNNx2(DyRCNN):

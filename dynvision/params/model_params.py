@@ -518,7 +518,7 @@ class ModelParams(BaseParams):
                 "lr_parameter_groups",
                 {
                     "regular": {"lr_factor": 1.0},
-                    "recurrent": {"lr_factor": 1.0},
+                    "recurrence": {"lr_factor": 1.0},
                     "feedback": {"lr_factor": 1.0},
                 },
                 mutation_tag="derived",

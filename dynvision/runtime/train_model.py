@@ -42,6 +42,7 @@ from dynvision.utils import (  # noqa: F401
     format_value,
 )
 from dynvision.utils.checkpoint_to_statedict import get_best_checkpoint
+from dynvision.utils.model_utils import load_weights_for_training
 
 # Import the Pydantic parameter classes
 from dynvision.params import TrainingParams
@@ -380,18 +381,19 @@ class ModelManager:
 
         model = model_class(**model_kwargs).to(self.device)
 
-        # Load state dict with error handling
+        # Load state dict. TemporalBase.load_state_dict patches missing/unexpected keys
+        # itself, so a strict load never fails: report what it returns instead.
         if load_state_dict:
-            try:
-                model.load_state_dict(state_dict, strict=True)
-                logger.info("Model state loaded successfully")
-            except Exception as e:
-                logger.warning(f"Strict loading failed: {e}. Trying non-strict...")
-                missing, unexpected = model.load_state_dict(state_dict, strict=False)
-                if missing:
-                    logger.warning(f"Missing keys: {missing}")
-                if unexpected:
-                    logger.warning(f"Unexpected keys: {unexpected}")
+            keys = load_weights_for_training(model, state_dict)
+            if keys["kept_tau"]:
+                logger.warning(
+                    f"Time constants taken from the config, not the weights: {keys['kept_tau']}"
+                )
+            if keys["missing"]:
+                logger.warning(f"Missing keys (keep their initialization): {keys['missing']}")
+            if keys["unexpected"]:
+                logger.warning(f"Unexpected keys (ignored): {keys['unexpected']}")
+            logger.info("Model state loaded")
 
         # Initialize model-specific settings
         if hasattr(model, "set_residual_timesteps"):

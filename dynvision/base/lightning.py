@@ -419,7 +419,7 @@ class LightningBase(pl.LightningModule):
         for group_name, group_params in params.items():
 
             if group_params:  # Only create groups with parameters
-                group_config = self.lr_parameter_groups.get(group_name, {})
+                group_config = dict(self.lr_parameter_groups.get(group_name, {}))
                 group_config["name"] = group_name
                 group_config["params"] = group_params
 

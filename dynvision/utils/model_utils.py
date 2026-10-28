@@ -170,6 +170,45 @@ def load_model_and_weights(
 
     return model
 
+def load_weights_for_training(
+    model: torch.nn.Module,
+    state_dict: Dict[str, torch.Tensor],
+    keep_time_constants: bool = True,
+) -> Dict[str, list]:
+    """Load weights into a freshly built model before training (init or transfer).
+
+    - Builds the lazily created skip/feedback convs first, so their weights are loaded
+      instead of being dropped as unexpected keys.
+    - With ``keep_time_constants``, ``tau`` entries are not loaded: the dynamics come from
+      this run's config (a tau=dt backbone must not switch a tau=2dt model back to alpha=1).
+
+    Returns a dict with ``missing``, ``unexpected`` and ``kept_tau`` key lists.
+    """
+    if hasattr(model, "_initialize_connections") and (
+        getattr(model, "skip", False) or getattr(model, "feedback", False)
+    ):
+        model._initialize_connections()
+
+    own_state = model.state_dict()
+    kept_tau = []
+    if keep_time_constants:
+        tau_keys = [
+            k for k in state_dict
+            if k.rsplit(".", 1)[-1].startswith("tau") and k in own_state
+        ]
+        kept_tau = [
+            k for k in tau_keys
+            if not torch.equal(state_dict[k].detach().cpu(), own_state[k].detach().cpu())
+        ]
+        state_dict = {k: v for k, v in state_dict.items() if k not in tau_keys}
+
+    result = model.load_state_dict(state_dict, strict=False)
+    return {
+        "missing": list(result.missing_keys),
+        "unexpected": list(result.unexpected_keys),
+        "kept_tau": kept_tau,
+    }
+
 def load_trained_model(
     model_path: str | Path,
     config_path: Optional[str | Path] = None,

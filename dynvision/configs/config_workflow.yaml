@@ -55,7 +55,7 @@ experiment:
 n_classes: 112
 batch_size: 16
 accumulate_grad_batches: 4
-precision: "16-mixed"
+precision: "bf16-mixed"
 num_workers: 2
 loss: 
   - CrossEntropyLoss

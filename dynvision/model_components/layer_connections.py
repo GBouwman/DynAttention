@@ -134,6 +134,19 @@ class ConnectionBase(LightningModule):
         in_channels = h.shape[-3]
         out_channels = x.shape[-3]
 
+        # Keep an existing conv of the right shape (e.g. weights that were just loaded).
+        # Re-creating it here would silently replace trained weights with a fresh init.
+        existing = getattr(self, "conv", None)
+        if (
+            isinstance(existing, nn.Conv2d)
+            and existing.in_channels == in_channels
+            and existing.out_channels == out_channels
+            and existing.kernel_size[0] == self.kernel_size
+            and existing.stride[0] == self.stride
+        ):
+            self.setup_transform = False
+            return
+
         # Create conv if channels differ OR if force_conv is True
         if in_channels == out_channels and not self.force_conv:
             self.conv = False
