@@ -98,6 +98,7 @@ class ModelParams(BaseParams):
             "pointdepthwise",
             "local",
             "localdepthwise",
+            "sheet",
             "none",
         ]
     ] = Field(default=None, description="Type of recurrent connections")
