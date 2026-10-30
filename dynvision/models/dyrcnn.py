@@ -80,6 +80,10 @@ class DyRCNN(BaseModel):
         fbmode="feedback_mode",
         pattern="data_presentation_pattern",
         shufflepattern="shuffle_presentation_pattern",
+        spmix="sheetpool_mix",
+        spfloor="sheetpool_sigma_floor",
+        spstart="sheetpool_sigma_start",
+        spdecay="sheetpool_decay_epochs",
     )
     def __init__(
         self,
