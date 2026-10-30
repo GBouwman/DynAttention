@@ -887,9 +887,10 @@ class RecurrentConnectedConv2d(ForwardRecurrenceBase):
             dim_y=in_dim_y,
             dim_x=in_dim_x,
         )
-
+        from dynvision.model_components.sheet_recurrence import SheetRecurrence
         # Map recurrence types to their implementations
         recurrence_types = {
+            "sheet": SheetRecurrence,
             "self": SelfConnection,
             "full": FullConnection,
             "depthpointwise": DepthPointwiseConnection,

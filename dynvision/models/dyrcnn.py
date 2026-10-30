@@ -109,6 +109,8 @@ class DyRCNN(BaseModel):
         sheetpool_sigma_floor: float = 0.75,
         sheetpool_schedule: bool = True,
         sheetpool_decay_epochs: float = 22.5,
+        sheetpool_mix: float = 1.0,
+        sheetpool_sigma_start: float = 0.5,
         **kwargs: Any,
     ) -> None:
 
@@ -117,6 +119,8 @@ class DyRCNN(BaseModel):
         self.sheetpool_sigma_floor = float(sheetpool_sigma_floor)
         self.sheetpool_schedule = str_to_bool(sheetpool_schedule)
         self.sheetpool_decay_epochs = float(sheetpool_decay_epochs)
+        self.sheetpool_mix = float(sheetpool_mix)
+        self.sheetpool_sigma_start = float(sheetpool_sigma_start)
 
         # Store DyRCNN-specific biological attributes
         self.train_tau = str_to_bool(train_tau)
@@ -161,19 +165,19 @@ class DyRCNN(BaseModel):
             setattr(
                 self,
                 f"sheetpool_{name}",
-                SheetPool(getattr(self, name).out_channels, sigma_floor=self.sheetpool_sigma_floor),
+                SheetPool(getattr(self, name).out_channels, sigma_floor=self.sheetpool_sigma_floor,mix=self.sheetpool_mix),
             )
 
     def _update_sheetpool_sigma(self, epoch: int) -> None:
         """Qian's schedule: σ = max(floor, ε·side/2), ε = min(exp(-epoch / decay), 1)."""
         eps = min(math.exp(-epoch / self.sheetpool_decay_epochs), 1.0)
-        for name in self.layer_names:
-            pool = getattr(self, f"sheetpool_{name}")
-            pool.set_sigma(eps * pool.side / 2)
+        for module in self.modules():
+            if isinstance(module, SheetPool):
+                module.set_sigma(eps * module.side * self.sheetpool_sigma_start)
 
     def on_train_epoch_start(self) -> None:
         super().on_train_epoch_start()
-        if self.sheetpool and self.sheetpool_schedule:
+        if self.sheetpool_schedule:
             self._update_sheetpool_sigma(self.current_epoch)
 
     def _parse_feedback_mode(self, feedback) -> None:
@@ -290,6 +294,7 @@ class DyRCNNx4(DyRCNN):
 
         # Activation functions
         self.nonlin = nn.ReLU(inplace=False)
+        self.nonlin._activity_monitor = "absolute"  # ActivityLoss hooks this shared ReLU: post-ReLU output of every area
         if hasattr(self, "supralinearity") and float(self.supralinearity) != 1:
             self.supralin = SupraLinearity(
                 n=float(self.supralinearity), requires_grad=False
@@ -496,6 +501,7 @@ class DyRCNNx8(DyRCNNx4):
 
         # Activation functions
         self.nonlin = nn.ReLU(inplace=False)
+        self.nonlin._activity_monitor = "absolute"  # ActivityLoss hooks this shared ReLU: post-ReLU output of every area
         if hasattr(self, "supralinearity") and float(self.supralinearity) != 1:
             self.supralin = SupraLinearity(
                 n=float(self.supralinearity), requires_grad=False

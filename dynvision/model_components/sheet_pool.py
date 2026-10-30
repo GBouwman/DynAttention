@@ -19,8 +19,9 @@ __all__ = ["SheetPool"]
 
 
 class SheetPool(nn.Module):
-    def __init__(self, n_channels: int, sigma_floor: float = 0.75) -> None:
+    def __init__(self, n_channels: int, sigma_floor: float = 0.75, mix: float = 1.0) -> None:
         super().__init__()
+        self.mix = float(mix) # y = (1 - mix)·x + mix·Kx; 1 = pure Qian pooling
         side = int(round(n_channels**0.5))
         if side * side != n_channels:
             raise ValueError(f"SheetPool needs a square channel count, got {n_channels}")
@@ -46,4 +47,5 @@ class SheetPool(nn.Module):
         if x is None:
             return None
         k = self.kernel().to(dtype=x.dtype)
-        return torch.einsum("ij,bj...->bi...", k, x)
+        pooled = torch.einsum("ij,bj...->bi...", k, x)
+        return pooled if self.mix == 1.0 else (1.0 - self.mix) * x + self.mix * pooled
